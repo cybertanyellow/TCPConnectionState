@@ -56,13 +56,20 @@ Reference from RFC793(Page 23] http://tools.ietf.org/html/rfc793#section-3.3
 
 class TCPConnectionState(Automaton):
 	do_debug = None 
-	peer_ip = "192.168.2.1"
-	local_ip = "192.168.15.23"
-	peer_dport = 5001
-	local_sport = RandShort()
 
 	cond_pkt = None
 	action_pkt = None
+
+	def parse_args(self, peer_ip = "192.168.2.1", peer_port = 5001, local_ip = "192.168.15.23", local_port = 12345, **kargs):
+		Automaton.parse_args(self, **kargs)
+		self.peer_ip = peer_ip
+		self.peer_port = peer_port
+		self.local_ip = local_ip
+		self.local_port = local_port
+
+	def master_filter(self, pkt):
+		return (IP in pkt and pkt[IP].src == self.peer_ip
+			and TCP in pkt and pkt[TCP].sport == self.peer_port)
 
 	@ATMT.state(initial=1)
 	def START(self):
@@ -76,7 +83,7 @@ class TCPConnectionState(Automaton):
 	@ATMT.action(active_open)
 	def send_syn(self):
 		print "try to send SYN"
-		self.action_pkt=IP(src=self.local_ip, dst=self.peer_ip)/TCP(dport=self.peer_dport, sport=self.local_sport, flags="S")
+		self.action_pkt=IP(src=self.local_ip, dst=self.peer_ip)/TCP(dport=self.peer_port, sport=self.local_port, flags="S")
 		send(self.action_pkt)
 
 	@ATMT.state()
@@ -85,14 +92,13 @@ class TCPConnectionState(Automaton):
 
 	@ATMT.receive_condition(SYN_SENT)
 	def recv_syn_ack(self, pkt):
-		if TCP in pkt and pkt[TCP].sport == 5001:
-			if pkt[TCP].flags == 0x12:
-				print "recv SYN,ACK"
-				self.cond_pkt = pkt
-				raise self.ESTABLISHED()
-			else:
-				if self.do_debug:
-					pkt.show()
+		if pkt[TCP].flags == 0x12:
+			print "recv SYN,ACK"
+			self.cond_pkt = pkt
+			raise self.ESTABLISHED()
+		else:
+			if self.do_debug:
+				pkt.show()
 
 
 
@@ -130,20 +136,19 @@ class TCPConnectionState(Automaton):
 
 	@ATMT.receive_condition(FIN_WAIT_1)
 	def recv_fin(self, pkt):
-		if TCP in pkt and pkt[TCP].sport == 5001:
-			self.cond_pkt = pkt
-			if pkt[TCP].flags == 0x10:
-				print "recv ACK"
-				raise self.FIN_WAIT_2()
-			elif pkt[TCP].flags == 0x1:
-				print "recv FIN"
-				raise self.CLOSING()
-			elif pkt[TCP].flags == 0x11:
-				print "recv FIN,ACK"
-				raise self.TIME_WAIT()
-			else:
-				if self.do_debug:
-					pkt.show()
+		self.cond_pkt = pkt
+		if pkt[TCP].flags == 0x10:
+			print "recv ACK"
+			raise self.FIN_WAIT_2()
+		elif pkt[TCP].flags == 0x1:
+			print "recv FIN"
+			raise self.CLOSING()
+		elif pkt[TCP].flags == 0x11:
+			print "recv FIN,ACK"
+			raise self.TIME_WAIT()
+		else:
+			if self.do_debug:
+				pkt.show()
 
 	@ATMT.action(recv_fin)
 	def fin_wait_1_send(self):
@@ -174,11 +179,10 @@ class TCPConnectionState(Automaton):
 
 	@ATMT.receive_condition(CLOSING)
 	def closing_recv_ack(self, pkt):
-		if TCP in pkt and pkt[TCP].sport == 5001:
-			self.cond_pkt = pkt
-			if pkt[TCP].flags == 0x10:
-				print "recv ACK"
-				raise self.TIME_WAIT()
+		self.cond_pkt = pkt
+		if pkt[TCP].flags == 0x10:
+			print "recv ACK"
+			raise self.TIME_WAIT()
 
 	@ATMT.action(closing_recv_ack)
 	def closing_send(self):
